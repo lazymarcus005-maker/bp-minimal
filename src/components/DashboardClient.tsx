@@ -56,6 +56,7 @@ export default function DashboardClient() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [requiresPasscode, setRequiresPasscode] = useState(false);
   const [modal, setModal] = useState<ModalState>({ show: false, passcodeInput: '' });
@@ -77,13 +78,30 @@ export default function DashboardClient() {
     })();
   }, []);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+
+    const updateIsMobile = () => {
+      setIsMobile(mediaQuery.matches);
+    };
+
+    updateIsMobile();
+    mediaQuery.addEventListener('change', updateIsMobile);
+
+    return () => mediaQuery.removeEventListener('change', updateIsMobile);
+  }, []);
+
+  function encodePasscodeHeader(passcodeValue: string): string {
+    return encodeURIComponent(passcodeValue);
+  }
+
   async function performLoad(passCodeValue: string) {
     setLoading(true);
     setError(null);
     try {
       console.log('Loading dashboard with passcode:', passCodeValue ? '***' : 'none');
       const response = await fetch('/api/dashboard', {
-        headers: passCodeValue ? { 'x-app-passcode': passCodeValue } : undefined,
+        headers: passCodeValue ? { 'x-app-passcode': encodePasscodeHeader(passCodeValue) } : undefined,
       });
       
       console.log('Response status:', response.status);
@@ -144,10 +162,51 @@ export default function DashboardClient() {
     () =>
       (data?.chart ?? []).map((item) => ({
         ...item,
-        label: new Date(item.at).toLocaleString(),
+        shortLabel: new Date(item.at).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        }),
       })),
     [data],
   );
+
+  const chartHeight = isMobile ? 260 : 360;
+  const chartMargin = isMobile
+    ? { top: 8, right: 8, bottom: 0, left: 0 }
+    : { top: 8, right: 20, bottom: 0, left: 0 };
+
+  function formatChartTick(value: string) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    if (isMobile) {
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+
+    return date.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function formatChartTooltipLabel(
+    label: unknown,
+    payload: readonly { payload?: { at?: string } }[],
+  ) {
+    const value = payload[0]?.payload?.at;
+
+    if (value) {
+      return formatChartTick(value);
+    }
+
+    return typeof label === 'string' ? label : '';
+  }
 
   // Landing screen when not initialized
   if (!isInitialized) {
@@ -324,15 +383,32 @@ export default function DashboardClient() {
 
           <section className="card">
             <h2>Trend</h2>
-            <div style={{ width: '100%', height: 360 }}>
+            <div style={{ width: '100%', height: chartHeight, overflow: 'hidden' }}>
               <ResponsiveContainer>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="label" hide />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="systolic" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="diastolic" strokeWidth={2} dot={false} />
+                <LineChart data={chartData} margin={chartMargin}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+                  <XAxis
+                    dataKey="at"
+                    hide={!isMobile}
+                    tickFormatter={formatChartTick}
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={10}
+                    minTickGap={24}
+                    tick={{ fill: 'var(--muted)', fontSize: 11 }}
+                  />
+                  <YAxis
+                    width={isMobile ? 28 : 36}
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    tick={{ fill: 'var(--muted)', fontSize: 11 }}
+                    allowDecimals={false}
+                    tickCount={isMobile ? 4 : 6}
+                  />
+                  <Tooltip labelFormatter={formatChartTooltipLabel} />
+                  <Line type="monotone" dataKey="systolic" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="diastolic" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
