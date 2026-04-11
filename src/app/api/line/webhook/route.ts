@@ -55,9 +55,12 @@ export async function POST(req: Request) {
       try {
         const { bytes, mimeType } = await fetchLineMessageImage(messageId);
         const imageBase64 = await resizeAndEncodeImage(bytes, mimeType);
+        const extractionMimeType =
+          mimeType === 'image/png' || mimeType === 'image/webp' ? mimeType : 'image/jpeg';
+
         const { result, raw } = await extractReadingFromImage({
-          mimeType,
-          base64: bytes.toString('base64'),
+          mimeType: extractionMimeType,
+          base64: imageBase64,
         });
 
         if (result.systolic === null || result.diastolic === null) {
