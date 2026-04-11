@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { assertLineSignature, fetchLineMessageImage, LineRequestError, replyLineText } from '@/lib/line';
 import { determineTargetMimeType, resizeAndEncodeImage } from '@/lib/image';
-import { extractReadingFromImage } from '@/lib/openrouter';
+import { extractReadingFromImage, summarizeBloodPressureHistory } from '@/lib/openrouter';
+import {
+  analyzeBloodPressureHistory,
+  buildBloodPressureFallbackSummary,
+  buildBloodPressureHistoryLines,
+  type BloodPressureHistoryReading,
+} from '@/lib/blood-pressure-history';
 import { getReadingsTable, getSupabaseAdmin } from '@/lib/supabase';
 import { saveReadingSchema } from '@/lib/validation';
 
@@ -63,6 +69,59 @@ function buildReadingSummaryText(data: {
   return lines.join('\n');
 }
 
+function isBloodPressureReportRequest(text: string) {
+  return /(รายงาน|สรุป|ประวัติ|history|report|summary|แนวโน้ม)/i.test(text.trim());
+}
+
+async function fetchRecentBloodPressureReadings(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const { data, error } = await supabase
+    .from(getReadingsTable())
+    .select('systolic,diastolic,pulse,measured_at,notes,created_at')
+    .order('measured_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(15);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as BloodPressureHistoryReading[];
+}
+
+async function buildBloodPressureReportReply(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const readings = await fetchRecentBloodPressureReadings(supabase);
+
+  if (readings.length === 0) {
+    return 'ยังไม่มีประวัติการวัดความดันในระบบ';
+  }
+
+  const historyLines = buildBloodPressureHistoryLines(readings);
+  const stats = analyzeBloodPressureHistory(readings);
+
+  let aiSummary: string;
+  try {
+    aiSummary = await summarizeBloodPressureHistory(readings);
+  } catch (error) {
+    console.error('[line-webhook] history summary failed', {
+      error: error instanceof Error ? error.message : 'Unknown summary error',
+    });
+    aiSummary = buildBloodPressureFallbackSummary({
+      ...stats,
+    });
+  }
+
+  const reportText = [
+    `รายงานความดันย้อนหลัง ${historyLines.length} รายการล่าสุด`,
+    '',
+    ...historyLines,
+    '',
+    'สรุปภาพรวมจาก AI',
+    aiSummary,
+  ].join('\n');
+
+  return reportText.length > 1900 ? `${reportText.slice(0, 1890)}...` : reportText;
+}
+
 export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
@@ -100,7 +159,15 @@ export async function POST(req: Request) {
         });
 
         if (event.message.type === 'text') {
-          await replyLineText(event.replyToken, 'ได้รับข้อความแล้ว กรุณาส่งรูปเครื่องวัดความดันหรือผลความดันที่เห็นตัวเลขชัดเจน');
+          const text = event.message.text?.trim() ?? '';
+
+          if (isBloodPressureReportRequest(text)) {
+            const replyText = await buildBloodPressureReportReply(supabase);
+            await replyLineText(event.replyToken, replyText);
+            continue;
+          }
+
+          await replyLineText(event.replyToken, 'ได้รับข้อความแล้ว หากต้องการดูรายงาน ให้พิมพ์คำว่า รายงาน หรือ สรุป ประวัติความดัน');
           continue;
         }
 

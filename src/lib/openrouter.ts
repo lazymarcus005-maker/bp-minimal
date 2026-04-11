@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { getOptionalEnv, getRequiredEnv } from '@/lib/env';
+import {
+  analyzeBloodPressureHistory,
+  buildBloodPressureFallbackSummary,
+  buildBloodPressureHistoryLines,
+  type BloodPressureHistoryReading,
+} from '@/lib/blood-pressure-history';
 
 export const extractionSchema = z.object({
   systolic: z.number().int().min(40).max(300).nullable(),
@@ -109,4 +115,67 @@ export async function extractReadingFromImage(input: { mimeType: string; base64:
     result,
     raw: parsed,
   };
+}
+
+export async function summarizeBloodPressureHistory(readings: BloodPressureHistoryReading[]) {
+  const stats = analyzeBloodPressureHistory(readings);
+  const historyLines = buildBloodPressureHistoryLines(readings);
+
+  if (historyLines.length === 0) {
+    return buildBloodPressureFallbackSummary(stats);
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${getRequiredEnv('OPENROUTER_API_KEY')}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': getOptionalEnv('OPENROUTER_REFERER', 'http://localhost:3000'),
+      'X-Title': getOptionalEnv('OPENROUTER_TITLE', 'BP Reader'),
+    },
+    body: JSON.stringify({
+      model: getOptionalEnv('OPENROUTER_MODEL', 'google/gemini-2.5-flash'),
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a Thai blood pressure history summarizer for LINE. Be concise, practical, and easy to read. Do not diagnose. Summarize the overall pattern, whether readings look mostly controlled or high, and mention if the data is stable or fluctuates.',
+        },
+        {
+          role: 'user',
+          content: [
+            'สรุปภาพรวมจากประวัติการวัดความดันด้านล่างเป็นภาษาไทย',
+            `จำนวนรายการ: ${stats.count}`,
+            `ค่าเฉลี่ย: ${stats.averageSystolic ?? '-'} / ${stats.averageDiastolic ?? '-'} mmHg`,
+            `ค่าสูงสุด: ${stats.highestSystolic ?? '-'} / ${stats.highestDiastolic ?? '-'} mmHg`,
+            `ค่าต่ำสุด: ${stats.lowestSystolic ?? '-'} / ${stats.lowestDiastolic ?? '-'} mmHg`,
+            `อยู่ในช่วงปกติ ${stats.normalCount} ครั้ง`,
+            `อยู่ในช่วงเริ่มสูง ${stats.elevatedCount} ครั้ง`,
+            `อยู่ในช่วงสูง ${stats.highCount} ครั้ง`,
+            'รายการล่าสุด (ใหม่ไปเก่า):',
+            ...historyLines,
+            '',
+            'ขอคำตอบสั้น กระชับ ไม่เกิน 6 บรรทัด และให้สรุปว่าโดยรวมเป็นอย่างไร',
+          ].join('\n'),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenRouter error: ${response.status} ${text}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('OpenRouter returned an empty response');
+  }
+
+  return content.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
 }
