@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { assertLineSignature, fetchLineMessageImage, LineRequestError } from '@/lib/line';
-import { getProcessedImageMimeType, resizeAndEncodeImage } from '@/lib/image';
+import { determineTargetMimeType, resizeAndEncodeImage } from '@/lib/image';
 import { extractReadingFromImage } from '@/lib/openrouter';
 import { getReadingsTable, getSupabaseAdmin } from '@/lib/supabase';
 import { saveReadingSchema } from '@/lib/validation';
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       try {
         const { bytes, mimeType } = await fetchLineMessageImage(messageId);
         const imageBase64 = await resizeAndEncodeImage(bytes, mimeType);
-        const extractionMimeType = getProcessedImageMimeType(mimeType);
+        const extractionMimeType = determineTargetMimeType(mimeType);
 
         const { result, raw } = await extractReadingFromImage({
           mimeType: extractionMimeType,
@@ -116,8 +116,6 @@ export async function POST(req: Request) {
     }
 
     const message = error instanceof Error ? error.message : 'Unknown LINE webhook error';
-    const status = message.includes('required environment variable') ? 500 : 400;
-
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
