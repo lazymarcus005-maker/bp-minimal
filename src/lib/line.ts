@@ -1,6 +1,16 @@
 import crypto from 'node:crypto';
 import { getRequiredEnv } from '@/lib/env';
 
+export class LineRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+    this.name = 'LineRequestError';
+  }
+}
+
 function getLineChannelSecret() {
   return getRequiredEnv('LINE_CHANNEL_SECRET');
 }
@@ -12,23 +22,18 @@ function getLineChannelAccessToken() {
 export function assertLineSignature(req: Request, body: string): void {
   const signature = req.headers.get('x-line-signature');
   if (!signature) {
-    throw new Error('Missing LINE signature');
+    throw new LineRequestError('Missing LINE signature', 401);
   }
 
-  const expected = crypto
-    .createHmac('sha256', getLineChannelSecret())
-    .update(body)
-    .digest('base64');
+  const expectedDigest = crypto.createHmac('sha256', getLineChannelSecret()).update(body).digest();
+  const receivedDigest = Buffer.from(signature, 'base64');
 
-  const signatureBuffer = Buffer.from(signature, 'utf8');
-  const expectedBuffer = Buffer.from(expected, 'utf8');
-
-  if (signatureBuffer.length !== expectedBuffer.length) {
-    throw new Error('Invalid LINE signature');
+  if (receivedDigest.length !== expectedDigest.length) {
+    throw new LineRequestError('Invalid LINE signature', 401);
   }
 
-  if (!crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
-    throw new Error('Invalid LINE signature');
+  if (!crypto.timingSafeEqual(receivedDigest, expectedDigest)) {
+    throw new LineRequestError('Invalid LINE signature', 401);
   }
 }
 

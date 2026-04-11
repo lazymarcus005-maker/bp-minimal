@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { assertLineSignature, fetchLineMessageImage } from '@/lib/line';
-import { resizeAndEncodeImage } from '@/lib/image';
+import { assertLineSignature, fetchLineMessageImage, LineRequestError } from '@/lib/line';
+import { getProcessedImageMimeType, resizeAndEncodeImage } from '@/lib/image';
 import { extractReadingFromImage } from '@/lib/openrouter';
 import { getReadingsTable, getSupabaseAdmin } from '@/lib/supabase';
 import { saveReadingSchema } from '@/lib/validation';
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     try {
       parsedBody = JSON.parse(rawBody);
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+      throw new LineRequestError('Invalid JSON body', 400);
     }
 
     const payload = lineWebhookSchema.parse(parsedBody);
@@ -55,8 +55,7 @@ export async function POST(req: Request) {
       try {
         const { bytes, mimeType } = await fetchLineMessageImage(messageId);
         const imageBase64 = await resizeAndEncodeImage(bytes, mimeType);
-        const extractionMimeType =
-          mimeType === 'image/png' || mimeType === 'image/webp' ? mimeType : 'image/jpeg';
+        const extractionMimeType = getProcessedImageMimeType(mimeType);
 
         const { result, raw } = await extractReadingFromImage({
           mimeType: extractionMimeType,
@@ -64,7 +63,13 @@ export async function POST(req: Request) {
         });
 
         if (result.systolic === null || result.diastolic === null) {
-          throw new Error('Missing systolic or diastolic from extraction');
+          const missingFields = [
+            result.systolic === null ? 'systolic' : null,
+            result.diastolic === null ? 'diastolic' : null,
+          ]
+            .filter(Boolean)
+            .join(', ');
+          throw new Error(`Missing extracted value(s): ${missingFields}`);
         }
 
         const reading = saveReadingSchema.parse({
@@ -106,13 +111,12 @@ export async function POST(req: Request) {
       errors,
     });
   } catch (error) {
+    if (error instanceof LineRequestError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown LINE webhook error';
-    const status =
-      message === 'Missing LINE signature' || message === 'Invalid LINE signature'
-        ? 401
-        : message.includes('required environment variable')
-          ? 500
-          : 400;
+    const status = message.includes('required environment variable') ? 500 : 400;
 
     return NextResponse.json({ error: message }, { status });
   }
