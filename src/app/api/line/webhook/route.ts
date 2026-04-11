@@ -85,7 +85,7 @@ export async function POST(req: Request) {
       const messageId = event.message.id;
       try {
         if (event.message.type === 'text') {
-          await replyLineText(event.replyToken, 'ได้รับข้อความแล้ว กรุณาส่งรูปภาพเพื่ออ่านค่าความดัน');
+          await replyLineText(event.replyToken, 'ได้รับข้อความแล้ว กรุณาส่งรูปเครื่องวัดความดันหรือผลความดันที่เห็นตัวเลขชัดเจน');
           continue;
         }
 
@@ -144,7 +144,10 @@ export async function POST(req: Request) {
       } catch (error) {
         if (event.message.type === 'image') {
           try {
-            await replyLineText(event.replyToken, 'ไม่สามารถอ่านค่าจากรูปนี้ได้ กรุณาส่งรูปใหม่ให้ชัดเจนขึ้น');
+            await replyLineText(
+              event.replyToken,
+              'ไม่สามารถอ่านค่าจากรูปนี้ได้ กรุณาถ่ายใหม่ให้เห็นหน้าจอชัดเจน แสงเพียงพอ และถ่ายตรงไม่เอียง'
+            );
           } catch {
             // Ignore reply errors to preserve primary processing error
           }
