@@ -8,13 +8,11 @@ export const saveReadingSchema = z
       .union([z.coerce.number().int().min(20).max(250), z.literal(''), z.null()])
       .transform((value) => (value === '' || value === null ? null : value)),
     measured_at: z
-      .string()
-      .optional()
-      .transform((value) => (value && value.trim().length > 0 ? value : null)),
+      .union([z.string(), z.null(), z.undefined()])
+      .transform((value) => (typeof value === 'string' && value.trim().length > 0 ? value : null)),
     notes: z
-      .string()
-      .optional()
-      .transform((value) => (value && value.trim().length > 0 ? value : null)),
+      .union([z.string(), z.null(), z.undefined()])
+      .transform((value) => (typeof value === 'string' && value.trim().length > 0 ? value : null)),
     confidence: z
       .union([z.coerce.number().min(0).max(1), z.literal(''), z.null(), z.undefined()])
       .transform((value) => (value === '' || value == null ? null : value)),

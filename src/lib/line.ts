@@ -38,6 +38,7 @@ export function assertLineSignature(req: Request, body: string): void {
 }
 
 export async function fetchLineMessageImage(messageId: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  console.info('[line] fetching message content', { messageId });
   const response = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`, {
     method: 'GET',
     headers: {
@@ -47,13 +48,26 @@ export async function fetchLineMessageImage(messageId: string): Promise<{ bytes:
 
   if (!response.ok) {
     const text = await response.text();
+    console.error('[line] failed to fetch message content', {
+      messageId,
+      status: response.status,
+      statusText: response.statusText,
+      body: text,
+    });
     throw new LineRequestError(`Failed to fetch LINE message content: ${response.status} ${text}`, 502);
   }
 
   const bytes = Buffer.from(await response.arrayBuffer());
   const mimeType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0];
 
+  console.info('[line] fetched message content', {
+    messageId,
+    mimeType,
+    byteLength: bytes.length,
+  });
+
   if (!mimeType.startsWith('image/')) {
+    console.error('[line] message content is not an image', { messageId, mimeType });
     throw new LineRequestError(`LINE content is not an image: ${mimeType}`, 400);
   }
 
@@ -61,6 +75,7 @@ export async function fetchLineMessageImage(messageId: string): Promise<{ bytes:
 }
 
 export async function replyLineText(replyToken: string, text: string): Promise<void> {
+  console.info('[line] replying to message', { replyTokenSuffix: replyToken.slice(-6), textPreview: text.slice(0, 80) });
   const response = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
     headers: {
@@ -80,6 +95,14 @@ export async function replyLineText(replyToken: string, text: string): Promise<v
 
   if (!response.ok) {
     const body = await response.text();
+    console.error('[line] failed to reply message', {
+      replyTokenSuffix: replyToken.slice(-6),
+      status: response.status,
+      statusText: response.statusText,
+      body,
+    });
     throw new LineRequestError(`Failed to reply LINE message: ${response.status} ${body}`, 502);
   }
+
+  console.info('[line] reply sent', { replyTokenSuffix: replyToken.slice(-6) });
 }

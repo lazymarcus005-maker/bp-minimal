@@ -12,9 +12,9 @@ import sharp from 'sharp';
 export async function resizeAndEncodeImage(
   buffer: Buffer,
   mimeType: string,
-  maxWidth: number = 450,
-  maxHeight: number = 800,
-  quality: number = 50
+  maxWidth: number = 1200,
+  maxHeight: number = 1600,
+  quality: number = 85
 ): Promise<string> {
   let image = sharp(buffer);
 

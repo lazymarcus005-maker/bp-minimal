@@ -66,6 +66,10 @@ function buildReadingSummaryText(data: {
 export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
+    console.info('[line-webhook] received request', {
+      contentType: req.headers.get('content-type'),
+      bodyLength: rawBody.length,
+    });
     assertLineSignature(req, rawBody);
 
     let parsedBody: unknown;
@@ -77,6 +81,11 @@ export async function POST(req: Request) {
 
     const payload = lineWebhookSchema.parse(parsedBody);
 
+    console.info('[line-webhook] parsed payload', {
+      eventCount: payload.events.length,
+      eventTypes: payload.events.map((event) => event.message.type),
+    });
+
     const supabase = getSupabaseAdmin();
     const errors: Array<{ messageId: string; error: string }> = [];
     let saved = 0;
@@ -84,6 +93,12 @@ export async function POST(req: Request) {
     for (const event of payload.events) {
       const messageId = event.message.id;
       try {
+        console.info('[line-webhook] processing event', {
+          messageId,
+          messageType: event.message.type,
+          sourceType: event.source?.type ?? null,
+        });
+
         if (event.message.type === 'text') {
           await replyLineText(event.replyToken, 'ได้รับข้อความแล้ว กรุณาส่งรูปเครื่องวัดความดันหรือผลความดันที่เห็นตัวเลขชัดเจน');
           continue;
@@ -93,9 +108,24 @@ export async function POST(req: Request) {
         const imageBase64 = await resizeAndEncodeImage(bytes, mimeType);
         const extractionMimeType = determineTargetMimeType(mimeType);
 
+        console.info('[line-webhook] image prepared for extraction', {
+          messageId,
+          mimeType,
+          extractionMimeType,
+          resizedBase64Length: imageBase64.length,
+        });
+
         const { result, raw } = await extractReadingFromImage({
           mimeType: extractionMimeType,
           base64: imageBase64,
+        });
+
+        console.info('[line-webhook] extraction result', {
+          messageId,
+          systolic: result.systolic,
+          diastolic: result.diastolic,
+          pulse: result.pulse,
+          confidence: result.confidence,
         });
 
         if (result.systolic === null || result.diastolic === null) {
@@ -127,8 +157,19 @@ export async function POST(req: Request) {
         const { error } = await supabase.from(getReadingsTable()).insert(reading);
 
         if (error) {
+          console.error('[line-webhook] supabase insert failed', {
+            messageId,
+            error: error.message,
+          });
           throw new Error(error.message);
         }
+
+        console.info('[line-webhook] reading saved', {
+          messageId,
+          saved,
+          systolic: reading.systolic,
+          diastolic: reading.diastolic,
+        });
 
         await replyLineText(
           event.replyToken,
@@ -142,6 +183,12 @@ export async function POST(req: Request) {
 
         saved += 1;
       } catch (error) {
+        console.error('[line-webhook] event failed', {
+          messageId,
+          messageType: event.message.type,
+          error: error instanceof Error ? error.message : 'Unknown processing error',
+        });
+
         if (event.message.type === 'image') {
           try {
             await replyLineText(

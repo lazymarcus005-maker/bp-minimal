@@ -25,10 +25,9 @@ export async function POST(req: Request) {
     // Resize and encode image as base64
     const imageBase64 = await resizeAndEncodeImage(bytes, image.type);
     
-    const base64 = bytes.toString('base64');
     const { result, raw } = await extractReadingFromImage({
       mimeType: image.type,
-      base64,
+      base64: imageBase64,
     });
 
     return NextResponse.json({ 
