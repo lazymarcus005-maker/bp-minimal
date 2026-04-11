@@ -47,14 +47,14 @@ export async function fetchLineMessageImage(messageId: string): Promise<{ bytes:
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`LINE content API error: ${response.status} ${text}`);
+    throw new LineRequestError(`Failed to fetch LINE message content: ${response.status} ${text}`, 502);
   }
 
   const bytes = Buffer.from(await response.arrayBuffer());
   const mimeType = (response.headers.get('content-type') ?? 'image/jpeg').split(';')[0] || 'image/jpeg';
 
   if (!mimeType.startsWith('image/')) {
-    throw new Error(`LINE content is not an image: ${mimeType}`);
+    throw new LineRequestError(`LINE content is not an image: ${mimeType}`, 400);
   }
 
   return { bytes, mimeType };

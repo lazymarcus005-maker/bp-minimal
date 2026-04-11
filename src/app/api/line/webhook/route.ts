@@ -69,7 +69,7 @@ export async function POST(req: Request) {
           ]
             .filter(Boolean)
             .join(', ');
-          throw new Error(`Missing extracted value(s): ${missingFields}`);
+          throw new Error(`Missing required blood pressure value(s): ${missingFields}`);
         }
 
         const reading = saveReadingSchema.parse({
