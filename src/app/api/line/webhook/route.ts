@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { assertLineSignature, fetchLineMessageImage, LineRequestError } from '@/lib/line';
+import { assertLineSignature, fetchLineMessageImage, LineRequestError, replyLineText } from '@/lib/line';
 import { determineTargetMimeType, resizeAndEncodeImage } from '@/lib/image';
 import { extractReadingFromImage } from '@/lib/openrouter';
 import { getReadingsTable, getSupabaseAdmin } from '@/lib/supabase';
@@ -14,6 +14,7 @@ const lineWebhookSchema = z.object({
     .array(
       z.object({
         type: z.literal('message'),
+        replyToken: z.string(),
         timestamp: z.number().optional(),
         source: z
           .object({
@@ -23,14 +24,44 @@ const lineWebhookSchema = z.object({
             roomId: z.string().optional(),
           })
           .optional(),
-        message: z.object({
-          type: z.literal('image'),
-          id: z.string(),
-        }),
+        message: z.union([
+          z.object({
+            type: z.literal('image'),
+            id: z.string(),
+          }),
+          z.object({
+            type: z.literal('text'),
+            id: z.string(),
+            text: z.string().optional(),
+          }),
+        ]),
       })
     )
     .default([]),
 });
+
+function buildReadingSummaryText(data: {
+  systolic: number;
+  diastolic: number;
+  pulse: number | null | undefined;
+  measuredAt: string | null | undefined;
+}): string {
+  const lines = [
+    'สรุปค่าที่จะบันทึก',
+    `SYS: ${data.systolic} mmHg`,
+    `DIA: ${data.diastolic} mmHg`,
+  ];
+
+  if (data.pulse !== null && data.pulse !== undefined) {
+    lines.push(`PULSE: ${data.pulse} bpm`);
+  }
+
+  if (data.measuredAt) {
+    lines.push(`TIME: ${data.measuredAt}`);
+  }
+
+  return lines.join('\n');
+}
 
 export async function POST(req: Request) {
   try {
@@ -53,6 +84,11 @@ export async function POST(req: Request) {
     for (const event of payload.events) {
       const messageId = event.message.id;
       try {
+        if (event.message.type === 'text') {
+          await replyLineText(event.replyToken, 'ได้รับข้อความแล้ว กรุณาส่งรูปเครื่องวัดความดันหรือผลความดันที่เห็นตัวเลขชัดเจน');
+          continue;
+        }
+
         const { bytes, mimeType } = await fetchLineMessageImage(messageId);
         const imageBase64 = await resizeAndEncodeImage(bytes, mimeType);
         const extractionMimeType = determineTargetMimeType(mimeType);
@@ -94,8 +130,29 @@ export async function POST(req: Request) {
           throw new Error(error.message);
         }
 
+        await replyLineText(
+          event.replyToken,
+          buildReadingSummaryText({
+            systolic: reading.systolic,
+            diastolic: reading.diastolic,
+            pulse: reading.pulse,
+            measuredAt: reading.measured_at,
+          })
+        );
+
         saved += 1;
       } catch (error) {
+        if (event.message.type === 'image') {
+          try {
+            await replyLineText(
+              event.replyToken,
+              'ไม่สามารถอ่านค่าจากรูปนี้ได้ กรุณาถ่ายใหม่ให้เห็นหน้าจอชัดเจน แสงเพียงพอ และถ่ายตรงไม่เอียง'
+            );
+          } catch {
+            // Ignore reply errors to preserve primary processing error
+          }
+        }
+
         errors.push({
           messageId,
           error: error instanceof Error ? error.message : 'Unknown processing error',

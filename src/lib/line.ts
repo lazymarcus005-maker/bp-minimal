@@ -59,3 +59,27 @@ export async function fetchLineMessageImage(messageId: string): Promise<{ bytes:
 
   return { bytes, mimeType };
 }
+
+export async function replyLineText(replyToken: string, text: string): Promise<void> {
+  const response = await fetch('https://api.line.me/v2/bot/message/reply', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${getLineChannelAccessToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [
+        {
+          type: 'text',
+          text,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new LineRequestError(`Failed to reply LINE message: ${response.status} ${body}`, 502);
+  }
+}
