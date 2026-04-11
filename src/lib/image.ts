@@ -37,3 +37,9 @@ export async function resizeAndEncodeImage(
 
   return processed.toString('base64');
 }
+
+export function determineTargetMimeType(inputMimeType: string): string {
+  if (inputMimeType === 'image/png') return 'image/png';
+  if (inputMimeType === 'image/webp') return 'image/webp';
+  return 'image/jpeg';
+}
